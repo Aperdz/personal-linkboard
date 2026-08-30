@@ -70,11 +70,11 @@ jobs:
 
       - name: Run backend ESLint
         working-directory: backend
-        run: npx eslint .
+        run: npx eslint . 
 
       - name: Run frontend ESLint
         working-directory: frontend
-        run: npx eslint .
+        run: npx eslint . 
 
 
   gitleaks:
