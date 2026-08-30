@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: linkboard-config
+  namespace: linkboard
+data:
+  MONGODB_URI: "mongodb://mongo:27017/linkboard"
+  REDIS_HOST: "redis"
+  REDIS_PORT: "6379"
+  BASE_URL: "http://localhost:4000"
+  PORT: "4000"

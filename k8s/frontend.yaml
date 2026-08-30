@@ -1,0 +1,61 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: linkboard-frontend
+  namespace: linkboard
+  labels:
+    app: linkboard-frontend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: linkboard-frontend
+  template:
+    metadata:
+      labels:
+        app: linkboard-frontend
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+        - name: frontend
+          image: linkboard-frontend:latest   # replace with your registry path
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3000
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests: { cpu: "100m", memory: "128Mi" }
+            limits: { cpu: "300m", memory: "256Mi" }
+          readinessProbe:
+            httpGet: { path: /, port: 3000 }
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: linkboard-frontend
+  namespace: linkboard
+  labels:
+    app: linkboard-frontend
+spec:
+  type: ClusterIP
+  selector:
+    app: linkboard-frontend
+  ports:
+    - port: 80
+      targetPort: 3000
+      name: http

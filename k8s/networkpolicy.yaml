@@ -1,0 +1,40 @@
+# Least-privilege networking: only backend pods may reach Mongo/Redis.
+# Same caveat as Project 1: requires a CNI that enforces NetworkPolicies
+# (Calico/Cilium) — kind's default CNI does not.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: mongo-allow-backend-only
+  namespace: linkboard
+spec:
+  podSelector:
+    matchLabels:
+      app: mongo
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: linkboard-backend
+      ports:
+        - protocol: TCP
+          port: 27017
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: redis-allow-backend-only
+  namespace: linkboard
+spec:
+  podSelector:
+    matchLabels:
+      app: redis
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: linkboard-backend
+      ports:
+        - protocol: TCP
+          port: 6379
