@@ -1,0 +1,158 @@
+name: Deploy (Dev -> Prod)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+env:
+  AWS_REGION: ap-southeast-1
+  ECR_BACKEND_REPO: linkboard-backend
+  ECR_FRONTEND_REPO: linkboard-frontend
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  build-and-push:
+    name: Build & Push Images
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.vars.outputs.image_tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set image tag (short git SHA)
+        id: vars
+        run: echo "image_tag=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build & push backend image
+        working-directory: ./backend
+        run: |
+          IMAGE_URI="${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_BACKEND_REPO }}:${{ steps.vars.outputs.image_tag }}"
+          docker build -t "$IMAGE_URI" .
+          docker push "$IMAGE_URI"
+
+      - name: Build & push frontend image
+        working-directory: ./frontend
+        run: |
+          IMAGE_URI="${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_FRONTEND_REPO }}:${{ steps.vars.outputs.image_tag }}"
+          docker build \
+            --build-arg NEXT_PUBLIC_API_URL="${{ secrets.DEV_API_URL }}" \
+            -t "$IMAGE_URI" .
+          docker push "$IMAGE_URI"
+
+  deploy-dev:
+    name: Deploy to Dev
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    environment: dev
+    defaults:
+      run:
+        working-directory: terraform/environments/dev
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.7.5"
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Apply
+        run: |
+          REGISTRY="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com"
+          terraform apply -auto-approve \
+            -var="backend_image=${REGISTRY}/${{ env.ECR_BACKEND_REPO }}:${{ needs.build-and-push.outputs.image_tag }}" \
+            -var="frontend_image=${REGISTRY}/${{ env.ECR_FRONTEND_REPO }}:${{ needs.build-and-push.outputs.image_tag }}"
+
+      - name: Get dev URL
+        id: dev_url
+        run: echo "url=$(terraform output -raw backend_url)" >> "$GITHUB_OUTPUT"
+
+      - name: Health check dev deployment
+        run: |
+          URL="${{ steps.dev_url.outputs.url }}/health"
+          echo "Checking $URL ..."
+          for i in $(seq 1 10); do
+            if curl -sf "$URL"; then
+              echo "Dev is healthy."
+              exit 0
+            fi
+            echo "Attempt $i failed, retrying in 15s..."
+            sleep 15
+          done
+          echo "Dev health check failed after all retries."
+          exit 1
+
+  deploy-prod:
+    name: Deploy to Prod
+    runs-on: ubuntu-latest
+    needs: deploy-dev
+    environment: prod
+    defaults:
+      run:
+        working-directory: terraform/environments/prod
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.7.5"
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Apply
+        run: |
+          REGISTRY="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com"
+          terraform apply -auto-approve \
+            -var="backend_image=${REGISTRY}/${{ env.ECR_BACKEND_REPO }}:${{ needs.build-and-push.outputs.image_tag }}" \
+            -var="frontend_image=${REGISTRY}/${{ env.ECR_FRONTEND_REPO }}:${{ needs.build-and-push.outputs.image_tag }}"
+
+      - name: Get prod URL
+        id: prod_url
+        run: echo "url=$(terraform output -raw backend_url)" >> "$GITHUB_OUTPUT"
+
+      - name: Health check prod deployment
+        run: |
+          URL="${{ steps.prod_url.outputs.url }}/health"
+          for i in $(seq 1 10); do
+            if curl -sf "$URL"; then
+              echo "Prod is healthy."
+              exit 0
+            fi
+            echo "Attempt $i failed, retrying in 15s..."
+            sleep 15
+          done
+          echo "Prod health check failed after all retries."
+          exit 1
