@@ -22,11 +22,24 @@ jobs:
         with:
           node-version: 22
           cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
 
-      - name: Install dependencies
+      - name: Install backend dependencies
+        working-directory: backend
         run: npm ci
 
-      - name: Check code formatting
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Check backend formatting
+        working-directory: backend
+        run: npx prettier --check .
+
+      - name: Check frontend formatting
+        working-directory: frontend
         run: npx prettier --check .
 
 
@@ -43,12 +56,25 @@ jobs:
         with:
           node-version: 22
           cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
 
-      - name: Install dependencies
+      - name: Install backend dependencies
+        working-directory: backend
         run: npm ci
 
-      - name: Run ESLint
-        run: npm run lint
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run backend ESLint
+        working-directory: backend
+        run: npx eslint . 
+
+      - name: Run frontend ESLint
+        working-directory: frontend
+        run: npx eslint . 
 
 
   gitleaks:
